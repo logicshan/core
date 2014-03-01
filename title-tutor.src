@@ -1,0 +1,14 @@
+\title{Tutor's guide\\
+for\\
+Implementing functional languages: a tutorial}
+\author{Simon L Peyton Jones \\ 
+	Department of Computing Science, University of Glasgow
+\and
+	and David R Lester \\
+	 Department of Computer Science, University of Manchester\\
+	 \copyright{} 1991}
+
+\maketitle
+
+\setcounter{tocdepth}{2}
+\tableofcontents

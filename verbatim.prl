@@ -1,0 +1,120 @@
+# !/bin/perl
+
+#########################
+#
+#	A Perl script to translate .src files to .tex files
+#
+#	Simon PJ  Nov 1991
+#
+#########################
+
+
+
+
+
+# 	Patterns
+#
+$PgmLinePatt = "^(\\d|\\d-|\\d-\\d)?>";
+
+# State variable and its values
+#
+$stNormal = 0;	
+$stNormBlank = 1;	# Normal text followed by as-yet-unprinted blank line
+$stProg = 2;		# Program text
+$stProgBlank = 3;	# Program text followed by as-yet-unprinted blank line
+$stVerb = 4;		# Stuff between "\begin{verbatim}" and end of same
+
+# Initialisation
+#
+$state = $stNormal;
+$lineNo = 1;
+
+while (<>) {
+
+    $curLine = $_ ;
+
+  if ($state == $stVerb) {
+	# inside \begin{verbatim}
+	print $curLine;
+	if ($curLine eq "\\end{verbatim}\n") { $state = $stNormal; }
+  }
+  else {
+
+    if ($curLine eq "\n") {
+
+	if ($state == $stNormal) { $state = $stNormBlank; }
+	elsif ($state == $stNormBlank) { print "\n"; }
+	elsif ($state == $stProg) { print "\\end{verbatim}\n"; 
+				    $state = $stProgBlank; }
+	elsif ($state == $stProgBlank) { print "\n"; } 
+	else {die "funny state";};
+    }
+    elsif ($curLine eq "\\begin{verbatim}\n") {
+	print $curLine; $state = $stVerb;
+    }
+    elsif ($curLine =~ /$PgmLinePatt(.*\n)/o) {
+
+	$pgmCts = $2;	# $PgmCts now has everything after "arrow"
+	
+	if ($state == $stNormal) {
+	    die( "Program text not separated by blank line, line ", lineNo );
+	} elsif ($state == $stNormBlank) {
+		print( "\\begin{verbatim}\n>", $pgmCts );
+	} elsif ($state == $stProg) { 
+		print( ">", $pgmCts ); 
+	} elsif ($state == $stProgBlank) {
+		print( "\\begin{verbatim}\n>", $pgmCts );
+	} else {die "funny state";};
+
+	$state = $stProg;
+    }
+    else {	# Normal text
+
+	if ($state == $stNormBlank) { print "\n"; }
+	elsif ($state == $stProg) { die "No blank line after prog text";}
+
+	$state = $stNormal;
+
+	# Print out text one char at a time, translating where necessary...
+
+	$verb = false;
+	@curChars = split( //, $curLine );
+
+	$curChar = shift( @curChars );
+
+	while ($curChar ne "\n") {
+
+	    if ($curChar eq '@' && ($verb eq false)) {
+
+		if ($curChars[0] eq '@') { 
+			print "@"; shift( @curChars );
+		} else {
+			print "\\mbox{\\tt "; $verb = true;
+		}
+	    }
+	    elsif ($curChar eq '@' && ($verb eq true)) {
+		print "}"; $verb = false;
+	    }
+	    elsif ($verb eq true) {
+		if ($curChar eq '#') { print ("{\\char'43}"); }
+		elsif ($curChar eq ' ') { print "\\ "; }
+		elsif ($curChar eq '$') { print ("{\\char'44}"); }
+		elsif ($curChar eq '%') { print ("{\\char'45}"); }
+		elsif ($curChar eq '&') { print ("{\\char'46}"); }
+		elsif ($curChar eq '~') { print ("{\\char'176}"); }
+		elsif ($curChar eq '_') { print ("{\\char'137}"); }
+		elsif ($curChar eq '^') { print ("{\\char'136}"); }
+		elsif ($curChar eq '\\') { print ("{\\char'134}"); }
+		elsif ($curChar eq '{') { print ("{\\char'173}"); }
+		elsif ($curChar eq '}') { print ("{\\char'175}"); }
+		else {print $curChar;}
+	   }
+	   else { print $curChar; }
+	
+	   $curChar = shift( @curChars );
+	};
+	print "\n";
+    };
+  }
+  $lineNo += 1;
+}

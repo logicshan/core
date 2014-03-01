@@ -1,0 +1,14 @@
+%	Preface to tutors notes
+
+\chapter*{Preface}
+
+This Tutor's Guide contains
+answers to many of the exercises, including sufficient code to build
+an executable program for each of the versions presented in the main text.
+
+You should read it in conjunction with the Installation Guide.
+
+While the Tutor's Guide contains the Miranda code to solve almost all
+the exercises, it is very short on supporting text.  We plan to improve it
+in the places that need it most, so please let us know where you looked
+for help and did not find it.  

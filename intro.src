@@ -1,0 +1,113 @@
+% $Date: 91/09/11 09:23:01 $
+% $Revision: 1.2 $
+% (c) 1991 Simon Peyton Jones & David Lester.
+\chapter{Introduction}
+
+The purpose of this book is to introduce a variety of techniques for
+implementing non-srict functional languages.  The unusual aspect of
+the book is that it is meant to be {\em executed} as well as {\em
+read}.
+
+Rather than merely presenting an abstract description of each implementation
+techniques, we present the code for 
+a complete working prototype of each major
+method, and then work through a series of improvements to it.
+
+The question immediately arises of what language to write the
+prototypes in.  We have chosen to use an existing functional language,
+Miranda.  One of the major uses of functional languages is for rapid
+protyping, because they allow us to express the fundamental aspects of
+the prototype without getting bogged down in administrative detail.
+We hope that this book can serve as a large example to substantiate
+this claim.  In addition, working through this book should provide
+useful experience of writing and modifying substantial functional programs.
+
+The text contains {\em all} the code required for each prototype.
+Occasionally, this becomes rather tiresome, because we have to present
+chunks of code which are not very interesting.  Such chunks could have been
+omitted from the printed text (though not from the executable version), but
+we have chosen to include it, so that you can always find a definition for
+every function.
+
+\section{Overview of the book}
+
+The principal content of the book is a series of implementations of
+a small functional language called the {\em Core language}.  The Core language
+is designed to be as small as possible, so that it is easy to implement,
+but still rich enough to allow modern non-strict functional languages to
+be translated into it without losing efficiency.  It is described in
+detail in Chapter~\ref{sect:language}, in which we also develop a parser
+and pretty-printer for the Core language.
+
+The main body of the book consists of 
+four distinct implementations of the Core language.
+\begin{itemize}
+\item
+Chapter~\ref{sect:template} describes the most direct implementation, based
+on {\em template instantiation}.
+
+\item
+Chapter~\ref{sect:g-machine} introduces the {\em G-machine}, and
+shows how to compile the program to 
+sequences of instructions (G-code) which could clearly be further translated
+to machine code.  
+
+\item
+Chapter~\ref{sect:tim} repeats the same exercise for a different abstract
+machine, the {\em Three Instruction Machine} (TIM), 
+whose evaluation model is very different to the G-machine.
+The TIM was developed more recently than the G-machine, so there is
+much less other literature about it.  Chapter~\ref{sect:tim} therefore
+contains a rather more detailed development of the TIM's evaluation 
+model than that given for the G-machine.
+
+\item
+Finally, Chapter~\ref{sect:par-g-machine} adds a new dimension by showing how
+to compile functional programs for a {\em parallel G-machine}.
+\end{itemize}
+
+For each of these implementations we discuss two main parts, the {\em compiler}
+and the {\em machine interpreter}.
+The compiler takes a Core-language program and translates it into a form
+suitable for execution by the machine interpreter.
+The machine interpreter simulates the execution of the compiled program.
+In each case it is modelled as a {\em state transition system} so that
+there is a very clear connection between the machine interpreter and
+a ``real'' implementation.  The interpreter is useful, though, both to execute
+compiled programs and to serve as a formal specification of the ``real'' 
+implementation.
+\begin{figure}
+\input{overview.tex}
+\caption{Overview of the implementations}
+\label{fig:overview}
+\end{figure}
+Figure~\ref{fig:overview} summarises the structure of our implementations.
+
+One important way in which the Core language is restrictive is
+in its lack of local function definitions.  There is a well-known 
+transformation, called {\em lambda lifting}, which turns local function
+definitions into global ones, thus enabling local function definitions to
+be written freely and transformed out later.  
+In Chapter~\ref{sect:lambda-lift} we develop
+a suitable lambda lifter.  
+This chapter is more than a just a re-presentation of standard material.
+{\em Full laziness} is a property of functional programs which had previously
+been seen as inseparable from lambda lifting.  In Chapter~\ref{sect:lambda-lift}
+we show that they are in fact quite distinct, and show how to implement
+full laziness in a separate pass from lambda lifting.
+
+Throughout the book we use a number of utility functions and data types
+which are defined in Appendix~\ref{sect:utils}.
+
+\section{What this book does not cover}
+
+We focus exclusively in this book on the ``back end'' of functional-language
+compilers.  We make no attempt to discuss how to translate programs written
+in a fully-fledged functional language, such as Miranda, into the Core language,
+or how to type-check such programs. 
+
+The development throughout is informal.  It would be nice to give a formal
+proof of the equivalence between the meaning of a Core program and
+its implementation, but this is quite a hard task.  Indeed, the only
+full proof of such an equivalence which we know of is \cite{Lester88}.
+

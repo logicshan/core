@@ -1,0 +1,206 @@
+\chapter{Lambda lifting}
+
+\section{Introducion}
+
+\section{Improving the @expr@ data type}
+
+\section{Mark~1: A Simple Lambda Lifter}
+
+\section{Mark 2: Improving the simple lambda lifter}
+
+2-> mkELet is_rec [] e    = e
+2-> mkELet is_rec defns e = ELet is_rec defns e
+
+Here is the missing code for case expressions.
+
+2-> freeVars_case lv e alts
+M2-> = (setUnion (freeVarsOf e') free, ACase e' alts')
+M2->   where 
+M2->   e'     = freeVars_e lv e
+M2->   alts'  = [ (tag, args, freeVars_e (setUnion lv (setFromList args)) e) 
+M2->	       | (tag, args, e) <- alts]
+M2->   free   = setUnionList (map freeVarsOf_alt alts')
+GH2->  = (setUnion (freeVarsOf e') free, ACase e' alts')
+GH2->    where 
+GH2->    e'     = freeVars_e lv e
+GH2->    alts'  = [ (tag, args, freeVars_e (setUnion lv (setFromList args)) e) 
+GH2->             | (tag, args, e) <- alts]
+GH2->    free   = setUnionList (map freeVarsOf_alt alts')
+
+
+2-> abstract_case free e alts
+M2-> = ECase (abstract_e e) [(tag, args, abstract_e e) | (tag, args, e) <- alts]
+GH2->  = ECase (abstract_e e) [(tag, args, abstract_e e) | (tag, args, e) <- alts]
+
+2-> rename_case env ns e alts
+M2-> = (ns2, ECase e' alts')
+M2->   where
+M2->   (ns1, e') = rename_e env ns e
+M2->   (ns2, alts') = mapAccuml rename_alt ns alts
+M2->   rename_alt ns (tag, args, rhs)
+M2->   = (ns2, (tag, args', rhs'))
+M2->     where
+M2->     (ns1, args', env') = newNames ns args
+M2->     (ns2, rhs')  = rename_e (env' ++ env) ns1 rhs
+GH2->  = (ns2, ECase e' alts')
+GH2->    where
+GH2->    (ns1, e') = rename_e env ns e
+GH2->    (ns2, alts') = mapAccuml rename_alt ns alts
+GH2->    rename_alt ns (tag, args, rhs)
+GH2->     = (ns2, (tag, args', rhs'))
+GH2->       where
+GH2->       (ns1, args', env') = newNames ns args
+GH2->       (ns2, rhs')  = rename_e (env' ++ env) ns1 rhs
+
+\section{Mark~3: Johnsson style lambda-lifting}
+
+\section{Mark~4: A separate full laziness pass}
+
+\section{Mark 5: Improvements to fully laziness}
+
+5-> freeToLevel_case level env free e alts
+M5-> = (freeSetToLevel env free, ACase e' alts')
+M5->   where
+M5->   e' = freeToLevel_e level env e
+M5->   alts' = map freeToLevel_alt alts
+M5->   freeToLevel_alt (tag, args, rhs)
+M5->   = (tag, args', freeToLevel_e (level+1) env' rhs)
+M5->     where env'  = args' ++ env
+M5->   	    args' = [(arg, level+1) | arg <- args]
+GH5->  = (freeSetToLevel env free, ACase e' alts')
+GH5->    where
+GH5->    e' = freeToLevel_e level env e
+GH5->    alts' = map freeToLevel_alt alts
+GH5->    freeToLevel_alt (tag, args, rhs)
+GH5->     = (tag, args', freeToLevel_e (level+1) env' rhs)
+GH5->       where env'  = args' ++ env
+GH5->             args' = [(arg, level+1) | arg <- args]
+
+Here is the code for @identifyMFEs_e1@.
+
+5-> identifyMFEs_case1 level body alts
+M5-> = ECase (identifyMFEs_e level body) (map identifyMFEs_alt alts)
+M5->   where
+M5->   identifyMFEs_alt (tag, [], e) = (tag, [], identifyMFEs_e level e)
+M5->   identifyMFEs_alt (tag, args, e)
+M5->   = (tag, args, identifyMFEs_e arg_level e)
+M5->     where
+M5->     (name, arg_level) = hd args
+GH5->  = ECase (identifyMFEs_e level body) (map identifyMFEs_alt alts)
+GH5->    where
+GH5->    identifyMFEs_alt (tag, [], e) = (tag, [], identifyMFEs_e level e)
+GH5->    identifyMFEs_alt (tag, args, e)
+GH5->     = (tag, args, identifyMFEs_e arg_level e)
+GH5->       where
+GH5->       (name, arg_level) = hd args
+
+The code for @renameGen_e@ is very straightforward:
+
+> renameGen_e new_b env ns (EVar v)      = (ns, EVar (aLookup env v v))
+
+Constructors, numbers and applications are easy.
+
+> renameGen_e new_b env ns (EConstr t a) = (ns, EConstr t a)
+> renameGen_e new_b env ns (ENum n)      = (ns, ENum n)
+> renameGen_e new_b env ns (EAp e1 e2)
+M> = (ns2, EAp e1' e2')
+M>   where
+M>   (ns1, e1') = renameGen_e new_b env ns e1
+M>   (ns2, e2') = renameGen_e new_b env ns1 e2
+GH>  = (ns2, EAp e1' e2')
+GH>    where
+GH>    (ns1, e1') = renameGen_e new_b env ns e1
+GH>    (ns2, e2') = renameGen_e new_b env ns1 e2
+
+When we meet an @ELam@ we need to invent new names for the arguments,
+using @newNames@, and augment the
+enironment with the mapping returned by @newNames@.
+
+> renameGen_e new_b env ns (ELam args body)
+M> = (ns1, ELam args' body')
+M>   where
+M>   (ns1, args', env') = new_b ns args
+M>   (ns2, body') = renameGen_e new_b (env' ++ env) ns1 body
+GH>  = (ns1, ELam args' body')
+GH>    where
+GH>    (ns1, args', env') = new_b ns args
+GH>    (ns2, body') = renameGen_e new_b (env' ++ env) ns1 body
+
+@let(rec)@ expressions work similarly:
+
+> renameGen_e new_b env ns (ELet is_rec defns body)
+M> = (ns3, ELet is_rec (zip2 binders' values') body')
+M>   where
+M>   (ns1, body') = renameGen_e new_b body_env ns body
+M>   binders = bindersOf defns
+M>   (ns2, binders', env') = new_b ns1 binders
+M>   body_env = env' ++ env
+M>   (ns3, values') = mapAccuml (renameGen_e new_b rhsEnv) ns2 (rhssOf defns)
+M>   rhsEnv = body_env, 	is_rec
+M>          = env, 	otherwise
+GH>  = (ns3, ELet is_rec (zip2 binders' values') body')
+GH>    where
+GH>    (ns1, body') = renameGen_e new_b body_env ns body
+GH>    binders = bindersOf defns
+GH>    (ns2, binders', env') = new_b ns1 binders
+GH>    body_env = env' ++ env
+GH>    (ns3, values') = mapAccuml (renameGen_e new_b rhsEnv) ns2 (rhssOf defns)
+GH>    rhsEnv | is_rec    = body_env
+GH>           | otherwise = env
+
+> renameGen_e new_b env ns (ECase e alts)
+M> = (ns2, ECase e' alts')
+M>   where
+M>   (ns1, e') = renameGen_e new_b env ns e
+M>   (ns2, alts') = mapAccuml rename_alt ns alts
+M>   rename_alt ns (tag, args, rhs)
+M>   = (ns2, (tag, args', rhs'))
+M>     where
+M>     (ns1, args', env') = new_b ns args
+M>     (ns2, rhs')  = renameGen_e new_b (env' ++ env) ns1 rhs
+GH>  = (ns2, ECase e' alts')
+GH>    where
+GH>    (ns1, e') = renameGen_e new_b env ns e
+GH>    (ns2, alts') = mapAccuml rename_alt ns alts
+GH>    rename_alt ns (tag, args, rhs)
+GH>     = (ns2, (tag, args', rhs'))
+GH>       where
+GH>       (ns1, args', env') = new_b ns args
+GH>       (ns2, rhs')  = renameGen_e new_b (env' ++ env) ns1 rhs
+
+Here is the @float_e@ case for 
+@case@ expressions. They are done in a similar way to lambda abstractions, 
+except that if an alternative
+binds no arguments then no definitions are deposited.
+
+5-> float_case e alts
+M5-> = (fd2, ECase e' alts')
+M5->   where
+M5->   (fd1, e') = float_e e
+M5->   (fd2, alts') = mapAccuml float_alt fd1 alts
+M5->
+M5->   float_alt fd (tag, [], rhs) = (fd ++ fd_rhs, (tag, [], rhs'))
+M5->				    where
+M5->				    (fd_rhs, rhs') = float_e rhs
+M5->   float_alt fd (tag, args, rhs)
+M5->   = (fd ++ fd_outer, (tag, args', install fd_this_level rhs'))
+M5->     where
+M5->     (fd_rhs, rhs') = float_e rhs
+M5->     args' = [arg | (arg,level) <- args]
+M5->     (first_arg,this_level) = hd args
+M5->     (fd_outer, fd_this_level) = partitionFloats this_level fd_rhs
+GH5->  = (fd2, ECase e' alts')
+GH5->    where
+GH5->    (fd1, e') = float_e e
+GH5->    (fd2, alts') = mapAccuml float_alt fd1 alts
+GH5->
+GH5->    float_alt fd (tag, [], rhs) = (fd ++ fd_rhs, (tag, [], rhs'))
+GH5->                                  where
+GH5->                                  (fd_rhs, rhs') = float_e rhs
+GH5->    float_alt fd (tag, args, rhs)
+GH5->     = (fd ++ fd_outer, (tag, args', install fd_this_level rhs'))
+GH5->       where
+GH5->       (fd_rhs, rhs') = float_e rhs
+GH5->       args' = [arg | (arg,level) <- args]
+GH5->       (first_arg,this_level) = hd args
+GH5->       (fd_outer, fd_this_level) = partitionFloats this_level fd_rhs

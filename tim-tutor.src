@@ -1,0 +1,1018 @@
+%       July 95: added Allyn Dimock's patches to include Gofer versions
+
+\chapter{TIM: the three-instruction machine}
+
+\section{Mark 2: Adding arithmetic}
+
+We present the extra code required for adding arithmetic, incorporating
+everything up to Exercise~\ref{ex:tim:cond2}.
+
+
+\subsubsection{Compilation rules}
+
+Here are the compilation schemes corresponding to 
+Figure~\ref{fig:tim:arith2}.  The only additions are extra rules for
+conditionals which are discussed in Exercises~\ref{ex:tim:cond1} 
+and \ref{ex:tim:cond2}.
+
+M2> compileR e env = compileB e env [Return],           isBasicOp e
+GH2> compileR e env | isBasicOp e = compileB e env [Return]
+M2> compileR e env = compileB kCond env [Cond il1 il2], isCondOp e
+GH2> compileR e env | isCondOp e = compileB kCond env [Cond il1 il2]
+2>                  where
+2>                  (kCond, kThen, kElse) = unpackCondOp e
+2>                  il1 = compileR kThen env
+2>                  il2 = compileR kElse env
+2>
+2> compileR (EAp e1 e2) env = Push (compileA e2 env) : compileR e1 env
+2> compileR (EVar v)    env = [Enter (compileA (EVar v) env)]
+2> compileR (ENum n)    env = [PushV (IntVConst n), Return]
+2> compileR e           env = error "compileR: can't do this yet"
+
+The $\B{}$ compilation scheme has a case for each form of specially-recognised
+operation.
+
+2> compileB e env cont 
+M2>  = compileB e2 env (compileB e1 env (Op op : cont)),        isBinOp e
+GH2>  | isBinOp e = compileB e2 env (compileB e1 env (Op op : cont))
+2>    where
+2>    (e1,op,e2) = unpackBinOp e
+2>
+2> compileB e env cont
+M2>  = compileB e1 env (Op op : cont),                  isUnOp e
+GH2>  | isUnOp e = compileB e1 env (Op op : cont)
+2>    where
+2>    (op,e1) = unpackUnOp e
+2> 
+2> compileB (ENum n) env cont = PushV (IntVConst n) : cont
+2> compileB e        env cont = Push  (Code cont) : compileR e env
+
+\subsubsection{New state transitions}
+
+New state transitions need to be provided for the new instructions:
+
+2-4> step ([Return], fptr, (instr',fptr'):stack, vstack, 
+2-4>    dump, heap, cstore, stats)
+2-4>  = (instr', fptr', stack, vstack, dump, heap, cstore, stats)
+
+2-4> step ((PushV FramePtr:instr), (FrameInt n), stack, vstack, 
+2-4>    dump, heap, cstore, stats)
+2-4>  = (instr, FrameInt n, stack, n:vstack, dump, heap, cstore, stats)
+
+2-4> step ((PushV (IntVConst n):instr), fptr, stack, vstack, 
+2-4>    dump, heap, cstore, stats)
+2-4>  = (instr, fptr, stack, n:vstack, dump, heap, cstore, stats)
+
+2-4> step ([Cond il1 il2], fptr, stack, b:vstack, dump, heap, cstore, stats)
+2-4>  = (instr', fptr, stack, vstack, dump, heap, cstore, stats)
+2-4>    where
+M2-4>    instr' = il1,  numToBool b     || True
+GH2-4>    instr' | numToBool b = il1     -- True
+M2-4>         = il2,    otherwise       || False
+GH2-4>          | otherwise = il2       -- False
+
+2-4> step ((Op op:instr), fptr, stack, vstack, dump, heap, cstore, stats)
+2-4>  = (instr, fptr, stack, performOp op vstack, dump, heap, cstore, stats)
+
+All the old transitions are exactly as before, except that @IntConst@ is
+now a possible @timAMode@ for @Push@ and @Enter@:
+
+2> step ((Take n:instr), fptr, stack, vstack, dump, heap, cstore,stats)
+M2>  = (instr, fptr', drop n stack, vstack, dump, heap', cstore, stats), #stack >= n
+GH2>  | length stack >= n = (instr, fptr', drop n stack, vstack, dump, heap', cstore, stats)
+M2>  = error "Too few args for Take instruction",                              otherwise
+GH2>  | otherwise = error "Too few args for Take instruction"
+2>    where (heap', fptr') = fAlloc heap (take n stack)
+
+2-4> step ([Enter am], fptr, stack, vstack, dump, heap, cstore, stats) 
+2-4>  = (instr', fptr', stack, vstack, dump, heap, cstore, stats)       
+2-4>    where (instr',fptr') = amToClosure am fptr heap cstore
+
+2-4> step ((Push am:instr), fptr, stack, vstack, dump, heap, cstore, stats)
+2-4>  = (instr, fptr, amToClosure am fptr heap cstore : stack, 
+2-4>     vstack, dump, heap, cstore, stats)
+
+We define a stub function, @step3@ (for the Mark 3 machine), 
+to fall through to, so that subsequent increments
+to the @step@ function can be done without copying all the code again.
+
+2-4> step state = step3 state
+2> step3 state = error "Unknown instruction"
+
+\subsubsection{Built-in functions}
+
+Auxilliary functions deal with recognising, unpacking, executing and
+showing  primitives:
+
+M2-> isBasicOp :: coreExpr -> bool
+GH2-> isBasicOp :: CoreExpr -> Bool
+M2-> isBasicOp e = isBinOp e \/ isUnOp e
+GH2-> isBasicOp e = isBinOp e || isUnOp e
+2->
+M2-> isBinOp :: coreExpr -> bool
+GH2-> isBinOp :: CoreExpr -> Bool
+2-> isBinOp (EAp (EAp (EVar op) e1) e2) = isOp op
+2-> isBinOp e = False
+2-> 
+2-> unpackBinOp (EAp (EAp (EVar op) e1) e2) = (e1, mkOp op, e2)
+2-> 
+M2-> isUnOp :: coreExpr -> bool
+GH2-> isUnOp :: CoreExpr -> Bool
+2-> isUnOp (EAp (EVar op) e1) = isOp op
+2-> isUnOp e = False
+2-> unpackUnOp (EAp (EVar op) e1) = (mkOp op, e1)
+2->
+M2-> isCondOp :: coreExpr -> bool
+GH2-> isCondOp :: CoreExpr -> Bool
+2-> isCondOp (EAp (EAp (EAp (EVar "if") kCond) kThen) kElse) = True
+2-> isCondOp e = False
+2-> unpackCondOp (EAp (EAp (EAp (EVar "if") kCond) kThen) kElse) = (kCond,kThen,kElse)
+
+M2-> isOp :: name -> bool
+GH2-> isOp :: Name -> Bool
+M2-> isOp op_name = member (map fst builtIns) op_name
+GH2-> isOp op_name = elem op_name (map fst builtIns) 
+2->
+M2-> mkOp :: name -> op
+GH2-> mkOp :: Name -> Op
+2-> mkOp op_name = aLookup builtIns op_name (error ("Unknown operator "
+2->                                                 ++ op_name))
+2->
+M2-> showOp :: op -> iseq
+GH2-> showOp :: Op -> Iseq
+M2-> showOp op = iStr (hd [name | (name, op') <- builtIns; op = op'])
+GH2-> showOp op = iStr (hd [name | (name, op') <- builtIns, op == op']) -- KH
+
+2-> builtIns = [ ("+", Add), ("-", Sub), ("*", Mult), ("/", Div),
+2->              ("negate", Neg),
+2->              (">", Gr), (">=", GrEq), ("<", Lt), ("<=", LtEq),
+2->              ("==", Eq), ("~=", NotEq)
+2->            ]
+
+
+M2-> performOp :: op -> timValueStack -> timValueStack
+GH2-> performOp :: Op -> TimValueStack -> TimValueStack
+2-> performOp Add   (a:b:vs)    = (a+b:vs)
+2-> performOp Sub   (a:b:vs)    = (a-b:vs)
+2-> performOp Mult  (a:b:vs)    = (a*b:vs)
+M2-> performOp Div   (a:b:vs)   = (a div b:vs)
+GH2-> performOp Div   (a:b:vs)  = (a `div` b:vs)
+2-> performOp Neg   (a:vs)      = (-a:vs)
+2-> performOp Gr    (a:b:vs)    = (boolToNum (a>b) : vs)
+2-> performOp GrEq  (a:b:vs)    = (boolToNum (a>=b) : vs)
+2-> performOp Lt    (a:b:vs)    = (boolToNum (a<b) : vs)
+2-> performOp LtEq  (a:b:vs)    = (boolToNum (a<=b) : vs)
+M2-> performOp Eq    (a:b:vs)   = (boolToNum (a=b) : vs)
+GH2-> performOp Eq    (a:b:vs)  = (boolToNum (a==b) : vs)
+M2-> performOp NotEq (a:b:vs)   = (boolToNum (a~=b) : vs)
+GH2-> performOp NotEq (a:b:vs)  = (boolToNum (a/=b) : vs)
+
+@boolToNum@ and @numToBool@ give the encoding of booleans as numbers.
+
+2-> boolToNum True = 2
+2-> boolToNum False = 1
+2->
+2-> numToBool 1 = False
+2-> numToBool 2 = True
+2-> numToBool n = error ("numToBool: unexpected number " ++ shownum n)
+
+\subsubsection{New printing facilites}
+
+Extra functionality needs to be provided in @showInstruction@ for
+displaying the new instructions and addressing modes.
+
+M2> showInstruction d (Take m)  = (iStr "Take ")  $iAppend (iNum m)
+GH2> showInstruction d (Take m)  = (iStr "Take ")  `iAppend` (iNum m)
+M2-> showInstruction d (Enter x) = (iStr "Enter ") $iAppend (showArg d x)
+GH2-> showInstruction d (Enter x) = (iStr "Enter ") `iAppend` (showArg d x)
+M2-> showInstruction d (Push x)  = (iStr "Push ")  $iAppend (showArg d x)
+GH2-> showInstruction d (Push x)  = (iStr "Push ")  `iAppend` (showArg d x)
+M2-> showInstruction d (PushV x) = (iStr "PushV ")  $iAppend (showVArg d x)
+GH2-> showInstruction d (PushV x) = (iStr "PushV ")  `iAppend` (showVArg d x)
+2-> showInstruction d Return    = (iStr "Return")
+M2-> showInstruction d (Op op)   = (iStr "Op ") $iAppend (showOp op)
+GH2-> showInstruction d (Op op)   = (iStr "Op ") `iAppend` (showOp op)
+2-> showInstruction d (Cond il1 il2) 
+2->  = iConcat [iStr "Cond ",
+2->             iIndent (iConcat [showInstructions d il1, iNewline,
+2->                               showInstructions d il2])
+2->    ]
+
+Just as with @step@ we fall through the Mark 3 machine if there is no
+match.  For now, @showInstructions3@ just fails.
+
+2-> showInstruction d i = showInstruction3 d i
+2> showInstruction3 d i = error "Unknown instruction"
+
+
+2-> showVArg d FramePtr = iStr "FramePtr"
+M2-> showVArg d (IntVConst n) = iStr "IntVConst " $iAppend (iNum n)
+GH2-> showVArg d (IntVConst n) = iStr "IntVConst " `iAppend` (iNum n)
+
+@showValueStack@ is redefined to print the value stack.
+
+2-> showValueStack vstack 
+2->  = iConcat [iStr "Val stack: [", 
+2->             iIndent (iInterleave (iStr ",") (map iNum vstack)),
+2->             iStr "]", iNewline
+2->    ]
+
+\section{Mark 3: Letrec expressions}
+
+We need a new instruction data type, adding an extra argument to @Take@, and
+adding the new @Move@ instruction.
+
+M3> instruction ::= Take num num
+M3>                | Push timAMode
+M3>                | PushV valueAMode
+M3>                | Enter timAMode
+M3>                | Return
+M3>                | Op op
+M3>                | Cond [instruction] [instruction]
+M3>                | Move num timAMode 
+GH3> data Instruction = Take Int Int
+GH3>                 | Push TimAMode
+GH3>                 | PushV ValueAMode
+GH3>                 | Enter TimAMode
+GH3>                 | Return
+GH3>                 | Op Op
+GH3>                 | Cond [Instruction] [Instruction]
+GH3>                 | Move Int TimAMode 
+
+\subsection{Compilation}
+
+The modifications to the compiler are mostly straightforward.
+@compileSC@ generates a modified @Take@ instruction.
+
+3> compileSC env (name, args, body)
+3>  = (name, Take d no_of_args : instructions)
+3>    where
+3>    (d, instructions) = compileR body (arg_env ++ env) no_of_args
+3>    arg_env = zip2 args (map Arg [1..])
+M3>    no_of_args = # args
+GH3>    no_of_args = length args
+
+The interesting bit of @compileR@ is the case for @let(rec)@ expressions.
+
+3> compileR (ELet isrec defs body) env d
+3>  = (d', move_instrs ++ il)
+3>    where
+3>    (dn, move_instrs) = mapAccuml 
+3>                              make_move_instr (d+no_of_defs) 
+3>                              (zip2 defs frame_slots)
+3>    (d', il) = compileR body new_env dn
+3>   
+3>    new_env = zip2 names (map mkIndMode frame_slots) ++ env
+M3>    no_of_defs = #defs
+GH3>    no_of_defs = length defs
+3>    names = [name | (name,rhs) <- defs]
+3>    frame_slots = [d+1..d+no_of_defs]
+3>
+3>    make_move_instr d ((name, rhs), frame_slot) 
+3>      = (d', Move frame_slot am) where (d', am) = compileA rhs rhs_env d
+3>
+M3>    rhs_env = env,     ~isrec
+M3>            = new_env, isrec
+GH3>    rhs_env | not isrec = env
+GH3>            | isrec     = new_env
+
+The other cases are as before, extended with additional plumbing.
+The main other interesting point is the special case
+for conditionals.  Since only one branch can execute, we can overlap the
+frame slots used in each branch.
+
+M3> compileR e env d = compileB e env (d, [Return]),            isBasicOp e
+GH3> compileR e env d | isBasicOp e = compileB e env (d, [Return])
+M3> compileR e env d = compileB kCond env (dmax, [Cond il1 il2]),       isCondOp e
+GH3> compileR e env d | isCondOp e = compileB kCond env (dmax, [Cond il1 il2])
+3>                     where
+3>                     (kCond, kThen, kElse) = unpackCondOp e
+3>                     (d1, il1) = compileR kThen env d
+3>                     (d2, il2) = compileR kElse env d
+M3>                     dmax = max [d1,d2]
+GH3>                     dmax = maximum [d1,d2]
+3>
+3> compileR (EAp e1 e2) env d 
+3>  = (d2, Push am : il)
+3>    where
+3>    (d1, am) = compileA e2 env d 
+3>    (d2, il) = compileR e1 env d1
+3>
+3> compileR (EVar v)    env d = (d1, [Enter am])
+3>                               where
+3>                               (d1,am) = compileA (EVar v) env d
+3>
+3> compileR (ENum n)    env d = (d, [PushV (IntVConst n), Return])
+3> compileR e           env d = error "compileR: can't do this yet"
+
+The modifications to @compileA@ add the extra plumbing.
+
+3> compileA (EVar v) env d = (d, aLookup env v (error ("Unknown variable " 
+3>                                                     ++ v)))
+3>
+3> compileA (ENum n) env d = (d, IntConst n)
+3> compileA e env d = (d1, Code il) where (d1, il) = compileR e env d
+
+The $\B{}$ compilation scheme has a case for each form of specially-recognised
+operation.
+
+3-> compileB e env (d,cont)
+M3->  = compileB e2 env (compileB e1 env (d, Op op:cont)),      isBinOp e
+GH3->  | isBinOp e = compileB e2 env (compileB e1 env (d, Op op:cont))
+3->    where
+3->    (e1,op,e2) = unpackBinOp e
+3->
+3-> compileB e env (d,cont)
+M3->  = compileB e1 env (d, Op op:cont),                                isUnOp e
+GH3->  | isUnOp e = compileB e1 env (d, Op op:cont)
+3->    where
+3->    (op,e1) = unpackUnOp e
+3-> 
+3-> compileB (ENum n) env (d,cont) = (d, PushV (IntVConst n) : cont)
+3-> compileB e env (d, cont) = (d1, Push (Code cont) : il)
+3->                            where
+3->                            (d1, il) = compileR e env d
+
+
+\subsection{New state transitions}
+
+We express the new state transitions by redefining @step3@ which was
+left as a fall-through from the Mark 2 machine.  We need to add transitions
+for @Take@ and @Move@.  
+
+The @Take@ instruction initialises the as-yet-unused frame slots with
+@dummy_closure@.  In a real implementation, of course, these slots
+could be left uninitialised.
+
+3-4> step3 ((Take tot n : instr), fptr, stack, vstack, dump, heap, cstore,stats)
+M3-4>  = (instr, fptr', drop n stack, vstack, dump, heap', cstore, stats), #stack >= n
+GH3-4>  | length stack >= n = (instr, fptr', drop n stack, vstack, dump, heap', cstore, stats)
+M3-4>  = error "Too few args for Take instruction",                      otherwise
+GH3-4>  | otherwise = error "Too few args for Take instruction"
+3-4>    where (heap', fptr') = fAlloc heap frame_cts
+3-4>                          where
+3-4>                          frame_cts = take n stack ++ 
+3-4>                                      take (tot-n) (repeat dummy_closure)
+3-4>                          dummy_closure = ([], FrameNull)
+
+The @Move@ instruction is straightforward.  It uses @amToClosure@ again.
+
+3-4> step3 ((Move n am : instr), fptr, stack, vstack, dump, heap, cstore,stats)
+3-4>  = (instr, fptr, stack, vstack, dump, heap', cstore, stats)
+3-4>    where heap' = fUpdate heap fptr n (amToClosure am fptr heap cstore)
+
+Finally, we add a fall-through case for the Mark 4 machine:
+
+3-4> step3 state = step4 state
+
+3> step4 state = error "Can't do this instruction yet"
+
+\subsection{Printing}
+
+We need extra cases for @showInstruction3@, with the usual fall-through
+to @showInstruction4@.
+
+3-> showInstruction3 d (Take tot n)
+3->  = iConcat [iStr "Take ", iNum tot, iStr " ", iNum n]
+3-> showInstruction3 d (Move n am)
+3->  = iConcat [iStr "Move ", iNum n, iStr " ", showArg d am]
+3-> showInstruction3 d i = showInstruction4 d i
+
+3> showInstruction4 d i = error "Unknown instruction"
+
+
+\section{Mark 4: Updating}
+
+We present only the completed code for the developments of this
+section.
+
+We need to extend the @instruction@ type yet again, to add the
+instructions @PushMarker@ and @UpdateMarkers@.
+
+M4> instruction ::= Take num num
+M4>                | Push timAMode
+M4>                | PushV valueAMode
+M4>                | Enter timAMode
+M4>                | Return
+M4>                | Op op
+M4>                | Cond [instruction] [instruction]
+M4>                | Move num timAMode 
+M4>                | PushMarker num
+M4>                | UpdateMarkers num
+GH4> data Instruction = Take Int Int
+GH4>                 | Push TimAMode
+GH4>                 | PushV ValueAMode
+GH4>                 | Enter TimAMode
+GH4>                 | Return
+GH4>                 | Op Op
+GH4>                 | Cond [Instruction] [Instruction]
+GH4>                 | Move Int TimAMode 
+GH4>                 | PushMarker Int
+GH4>                 | UpdateMarkers Int
+
+\subsection{Compilation}
+
+The only change to @compileSC@ is to add the @UpdateMarkers@ instruction
+before the @Take@.
+
+4-> compileSC env (name, args, body)
+4->  = (name, UpdateMarkers no_of_args : Take d no_of_args : instructions)
+4->    where
+4->    (d, instructions) = compileR body (arg_env ++ env) no_of_args
+4->    arg_env = zip2 args (map Arg [1..])
+M4->    no_of_args = # args
+GH4->    no_of_args = length args
+
+The differences to @compileR@ are:
+\begin{itemize}
+\item
+it builds self-updating closures for @let(rec)@-bound variables,
+and uses @compileAL@ to generate the right-hand side.
+\item
+it generates non-updating indirection addressing modes 
+for of @let(rec)@-bound variables.
+\item
+it makes non-trivial arguments of function calls behave 
+just as if they were @let@-bound to a new variable, and that variable
+passed in the call, using @compileAL@.
+\end{itemize}
+
+4> compileR (ELet isrec defs body) env d
+4>  = (d', move_instrs ++ il)
+4>    where
+4>    (dn, move_instrs) = mapAccuml 
+4>                              make_move_instr (d+no_of_defs) 
+4>                              (zip2 defs frame_slots)
+4>    (d', il) = compileR body new_env dn
+4>   
+4>    new_env = zip2 names (map mkIndMode frame_slots) ++ env
+M4>    no_of_defs = #defs
+GH4>    no_of_defs = length defs
+4>    names = [name | (name,rhs) <- defs]
+4>    frame_slots = [d+1..d+no_of_defs]
+4>
+4>    make_move_instr d ((name, rhs), frame_slot) 
+4>      = (d', Move frame_slot am) 
+4>        where (d', am) = compileAL rhs frame_slot rhs_env d
+4>
+M4>    rhs_env = env,   ~isrec
+GH4>    rhs_env | not isrec = env
+M4>           = new_env,        isrec
+GH4>           | isrec     = new_env
+4>      
+M4> compileR e env d = compileB e env (d, [Return]),            isBasicOp e
+GH4> compileR e env d | isBasicOp e = compileB e env (d, [Return])
+M4> compileR e env d = compileB kCond env (dmax, [Cond il1 il2]),       isCondOp e
+GH4> compileR e env d | isCondOp e = compileB kCond env (dmax, [Cond il1 il2])
+4>                     where
+4>                     (kCond, kThen, kElse) = unpackCondOp e
+4>                     (d1, il1) = compileR kThen env d
+4>                     (d2, il2) = compileR kElse env d
+M4>                     dmax = max [d1,d2]
+GH4>                     dmax = maximum [d1,d2]
+4>
+4> compileR (EAp e1 e2) env d 
+M4>  = (d1, Push (compileA e2 env) : il),       isAtomicExpr e2
+GH4>  | isAtomicExpr e2 = (d1, Push (compileA e2 env) : il)
+4>    where
+4>    (d1, il) = compileR e1 env d
+4>
+M4> compileR (EAp e1 e2) env d  || Non-atomic argument e2
+GH4> compileR (EAp e1 e2) env d -- Non-atomic argument e2
+4>  = (d2, Move (d+1) am : Push (Code [Enter (Arg (d+1))]) : il)
+4>    where
+4>    (d1, am) = compileAL e2 (d+1) env (d+1)
+4>    (d2, il) = compileR e1 env d1
+4>
+4> compileR (EVar v)    env d = (d, [Enter (compileA (EVar v) env)])
+4>
+4> compileR (ENum n)    env d = (d, [PushV (IntVConst n), Return])
+4> compileR e           env d = error "compileR: can't compile this!"
+
+The auxiliary function @idAtomicExpr@ picks out variables and constants.
+It is called from the @EAp@ case of @compileR@.
+
+@compileB@ is unchanged.
+@compileA@ no longer needs a case for
+anything other than variables and numbers, nor does it need 
+a frame-usage argument or result.
+
+4-> compileA (EVar v) env = aLookup env v (error ("Unknown variable " 
+4->                                               ++ v))
+4-> compileA (ENum n) env = IntConst n
+
+@compileAL@ is new.  It follows the compilation scheme given in 
+Figure~\ref{fig:tim:al-scheme}.
+
+4-> compileAL (ENum n) upd_slot env d = (d, IntConst n)
+4-> compileAL e        upd_slot env d = (d1, Code (PushMarker upd_slot: il))
+4->                                     where (d1, il) = compileR e env d
+
+\subsection{New state transitions}
+
+4> step4 ((PushMarker x : instr), fptr, stack, vstack, 
+4>        dump, heap, cstore, stats)
+4>  = (instr, fptr, [], vstack, (fptr, x, stack):dump, heap, cstore, stats)
+
+The @Return@ instruction has an extra case to cope with the
+empty stack, in which case an update should be performed:
+
+4> step4 ([Return], fptr, [], n:vstack, (f_upd, x, stack) : dump, 
+4>         heap, cstore, stats)
+4>  = ([Return], fptr, stack, n:vstack, dump, heap', cstore, stats)
+4>    where
+4>    heap' = fUpdate heap f_upd x (intCode, FrameInt n)
+
+The @UpdateMarkers@ instruction updates closures with a partial application.
+The first rule deals with the case where enough arguments are on the stack,
+so no update need be performed:
+
+4> step4 ((UpdateMarkers n : instr), fptr, stack, vstack,
+4>        dump, heap, cstore, stats)
+M4>  = (instr, fptr, stack, vstack, dump, heap, cstore, stats), n <= #stack
+GH4>  | n <=  length stack = (instr, fptr, stack, vstack, dump, heap, cstore, stats)
+
+If this does not work, the second rule performs an update:
+
+4> step4 ((UpdateMarkers n : instr), fptr, stack, vstack,
+4>        (f_upd, x, stack') : dump, heap, cstore, stats)
+4>  = (UpdateMarkers n : instr, fptr, stack ++ stack', vstack,
+4>     dump, heap2, cstore, stats)
+4>    where
+4>    (heap1, pa_fptr) = fAlloc heap stack
+4>    heap2 = fUpdate heap1 f_upd x (pa_code, pa_fptr)
+4>    pa_code = (map (Push . Arg) (reverse [1..m])) ++ 
+4>               (UpdateMarkers n : instr)
+M4>    m = #stack
+GH4>    m = length stack
+
+4> step4 state = error "Can't do this instruction yet"
+
+\subsection{Printing}
+
+We add code to print the new instructions.
+
+M4-> showInstruction4 d (UpdateMarkers n) = iStr "UpdateMarkers " $iAppend iNum n
+GH4-> showInstruction4 d (UpdateMarkers n) = iStr "UpdateMarkers " `iAppend` iNum n
+M4-> showInstruction4 d (PushMarker n) = iStr "PushMarker " $iAppend iNum n
+GH4-> showInstruction4 d (PushMarker n) = iStr "PushMarker " `iAppend` iNum n
+4-> showInstruction4 d i = showInstruction5 d i
+
+4> showInstruction5 d i = error "Unknown instruction"
+
+We print the dump showing only the size of the saved stack for brevity.
+
+4-> showDump dump
+4->  = iConcat [iStr "Dump:   [", 
+4->             iIndent (iInterleave (iStr ", ") (map showDumpItem dump)),
+4->             iStr "]", iNewline
+4->    ]
+4->    where
+4->    showDumpItem (fptr, slot, stack)
+4->     = iConcat [ iStr "(", showFramePtr fptr, iStr ",", 
+4->                 iNum slot, iStr ",",
+M4->                 iStr "<stk size ", iNum (#stack), iStr ">)"
+GH4->                iStr "<stk size ", iNum (length stack), iStr ">)"
+4->       ]
+
+
+\section{Mark 5: Data structures}
+
+The changes needed to accomodate data structures are a little tiresome,
+because we need to add a new components to the machine state, for the 
+data frame pointer and the machine output.  
+
+M5> timState == ([instruction],         || The current instruction stream
+M5>             framePtr,               || Address of current frame
+M5>             framePtr,               || Data frame pointer
+M5>             timStack,               || Stack of arguments
+M5>             timValueStack,          || Value stack
+M5>             timDump,                || Dump
+M5>             timHeap,                || Heap of frames
+M5>             codeStore,              || Labelled blocks of code
+M5>             [num],                  || Output
+M5>             timStats)               || Statistics
+GH5> type TimState = ([Instruction],    -- The current instruction stream
+GH5>                FramePtr,           -- Address of current frame
+GH5>                FramePtr,           -- Data frame pointer
+GH5>                TimStack,           -- Stack of arguments
+GH5>                TimValueStack,      -- Value stack
+GH5>                TimDump,            -- Dump
+GH5>                TimHeap,            -- Heap of frames
+GH5>                CodeStore,          -- Labelled blocks of code
+GH5>                 [Int],             -- Output
+GH5>                TimStats)           -- Statistics
+
+This entails a new @timFinal@ and  @applyToStats@ functions.
+
+5> timFinal ([], fptr, fdptr, stack, vstack, 
+5>           dump, heap, cstore, output, stats) = True
+5> timFinal state                               = False
+
+
+5> applyToStats stats_fun (instr, fptr, fdptr, stack, vstack, 
+5>                        dump, heap, cstore, output, stats)
+5>  = (instr, fptr, fdptr, stack, vstack, 
+5>     dump, heap, cstore, output, stats_fun stats)
+
+We need to extend the @instruction@ type, to add the
+instructions @Switch@ and @ReturnConstr@:
+
+M5> instruction ::= Take num num
+M5>                | Push timAMode
+M5>                | PushV valueAMode
+M5>                | Enter timAMode
+M5>                | Return
+M5>                | Op op
+M5>                | Cond [instruction] [instruction]
+M5>                | Move num timAMode 
+M5>                | MoveD num num
+M5>                | PushMarker num
+M5>                | UpdateMarkers num
+M5>                | Switch [(num, [instruction])]
+M5>                | ReturnConstr num
+M5>                | Print
+GH5> data Instruction = Take Int Int
+GH5>                 | Push TimAMode
+GH5>                 | PushV ValueAMode
+GH5>                 | Enter TimAMode
+GH5>                 | Return
+GH5>                 | Op Op
+GH5>                 | Cond [Instruction] [Instruction]
+GH5>                 | Move Int TimAMode 
+GH5>                 | MoveD Int Int
+GH5>                 | PushMarker Int
+GH5>                 | UpdateMarkers Int
+GH5>                 | Switch [(Int, [Instruction])]
+GH5>                 | ReturnConstr Int
+GH5>                 | Print
+
+There is a new addressing mode @Data@ to add to @timAMode@.
+
+M5> timAMode ::= Arg num
+M5>             | Data num
+M5>             | Label [char]
+M5>             | Code [instruction]
+M5>             | IntConst num
+GH5> data TimAMode = Arg Int
+GH5>              | Data Int
+GH5>              | Label [Char]
+GH5>              | Code [Instruction]
+GH5>              | IntConst Int
+
+
+\subsection{New compilation rules}
+
+The @compile@ function is altered to initialise 
+the new state components.  
+
+5> compile program
+M5>     = (  [Enter (Label "main")],    || Initial instructions
+M5>         FrameNull,                  || Null frame pointer
+M5>          FrameNull,                 || Null data frame pointer
+M5>         [(topCont, two_slot_frame)],|| Argument stack
+M5>         initialValueStack,          || Value stack
+M5>         initialDump,                || Dump
+M5>         initial_heap,               || Heap
+M5>         compiled_code,              || Compiled code for supercombinators
+M5>         [],                         || Output
+M5>         statInitial)                || Initial statistics
+GH5>     = (  [Enter (Label "main")],   -- Initial instructions
+GH5>        FrameNull,                  -- Null frame pointer
+GH5>        FrameNull,                  -- Null data frame pointer
+GH5>        [(topCont, two_slot_frame)],-- Argument stack
+GH5>        initialValueStack,          -- Value stack
+GH5>        initialDump,                -- Dump
+GH5>        initial_heap,               -- Heap
+GH5>        compiled_code,              -- Compiled code for supercombinators
+GH5>        [],                         -- Output
+GH5>        statInitial)                -- Initial statistics
+5>        where
+5>          sc_defs          = preludeDefs ++ extraPreludeDefs ++ program
+5>          compiled_sc_defs = map (compileSC initial_env) sc_defs
+5>          compiled_code    = compiled_sc_defs ++ compiledPrimitives
+5>          (initial_heap, two_slot_frame) 
+5>              = fAlloc hInitial [([],FrameNull), ([],FrameNull)]
+5>          initial_env = [(name, Label name) | (name, args, body) <- sc_defs]
+5>                        ++ [(name, Label name) | (name, code) <- compiledPrimitives]
+
+@extraPreludeDefs@ is defined below.
+
+The changes to @compileR@ amount to adding cases for @Cons@ and @case@,
+and removing the special case for conditionals (which is now done
+via @case@):
+
+5> compileR (EConstr tag arity) env d
+5>  = (d, [UpdateMarkers arity, Take arity arity, ReturnConstr tag])
+5>
+5> compileR (ECase e alts) env d
+5>  = (d2, Push (Code [Switch branches]) : il)
+5>    where
+5>    compiled_alts = map (compileE d env) alts
+M5>    d1 = max [d | (d,branch) <- compiled_alts]
+GH5>    d1 = maximum [d | (d,branch) <- compiled_alts]
+5>    branches = [branch | (d,branch) <- compiled_alts]
+5>    (d2, il) = compileR e env d1
+
+5> compileR (ELet isrec defs body) env d
+5>  = (d', move_instrs ++ il)
+5>    where
+5>    (dn, move_instrs) = mapAccuml 
+5>                              make_move_instr (d+no_of_defs) 
+5>                              (zip2 defs frame_slots)
+5>    (d', il) = compileR body new_env dn
+5>   
+5>    new_env = zip2 names (map mkIndMode frame_slots) ++ env
+M5>    no_of_defs = #defs
+GH5>    no_of_defs = length defs
+5>    names = [name | (name,rhs) <- defs]
+5>    frame_slots = [d+1..d+no_of_defs]
+5>
+5>    make_move_instr d ((name, rhs), frame_slot) 
+5>      = (d', Move frame_slot am) 
+5>        where (d', am) = compileAL rhs frame_slot rhs_env d
+5>
+M5>    rhs_env = env,   ~isrec
+M5>           = new_env,        isrec
+GH5>    rhs_env | not isrec = env
+GH5>           | isrec     = new_env
+5>      
+M5> compileR e env d = compileB e env (d, [Return]),            isBasicOp e
+GH5> compileR e env d | isBasicOp e = compileB e env (d, [Return])
+5>
+5> compileR (EAp e1 e2) env d 
+M5>  = (d1, Push (compileA e2 env) : il),       isAtomicExpr e2
+GH5>  | isAtomicExpr e2 = (d1, Push (compileA e2 env) : il)
+5>    where
+5>    (d1, il) = compileR e1 env d
+5>
+M5> compileR (EAp e1 e2) env d  || Non-atomic argument e2
+GH5> compileR (EAp e1 e2) env d -- Non-atomic argument e2
+5>  = (d2, Move (d+1) am : Push (Code [Enter (Arg (d+1))]) : il)
+5>    where
+5>    (d1, am) = compileAL e2 (d+1) env (d+1)
+5>    (d2, il) = compileR e1 env d1
+5>
+5> compileR (EVar v)    env d = (d, [Enter (compileA (EVar v) env)])
+5>
+5> compileR (ENum n)    env d = (d, [PushV (IntVConst n), Return])
+5> compileR e           env d = error "compileR: can't compile this!"
+
+@compileE@ implements the $\E{}$ compilation scheme.
+Notice that the variables bound by the @case@ alternative are freely
+copyable, because they were originally passed as argument to @Cons@;
+hence we generate @Arg@ addressing modes for them.
+
+5> compileE d env (tag, args, rhs)
+5>  = (d', (tag, map make_move_instr component_slots ++ rhs_instrs))
+5>    where
+5>    component_slots = [d+1..d+no_of_args]
+5>    make_move_instr slot = Move slot (Data (slot-d))
+5>    (d', rhs_instrs) = compileR rhs new_env (d+no_of_args)
+5>    new_env = zip2 args (map Arg component_slots) ++ env
+M5>    no_of_args = #args
+GH5>    no_of_args = length args
+
+\subsection{New state transitions}
+
+The @Switch@ instruction just looks up the tag to find the appropriate
+branch.
+
+5-> step ([Switch branches], fptr, fdptr, stack, (tag:vstack),
+5->        dump, heap, cstore, output, stats)
+5->  = (new_code, fptr, fdptr, stack, vstack, 
+5->     dump, heap, cstore, output, stats)
+5->    where
+5->    new_code = aLookup branches tag (error ("Switch: bad tag " 
+5->                                           ++ show tag))
+
+The @ReturnConstr@ instruction has two cases.  The first is the usual
+case, where no update is to be performed:
+
+5-> step ([ReturnConstr tag], fptr, fdptr, (instr',fptr'):stack, vstack,
+5->        dump, heap, cstore, output, stats)
+5->  = (instr', fptr', fptr, stack, tag:vstack, 
+5->     dump, heap, cstore, output, stats)
+
+The second deals with the update case:
+
+5-> step ([ReturnConstr tag], fptr, fdptr, [], vstack,
+5->        (f_upd,upd_slot,stack'):dump, heap, cstore, output, stats)
+5->  = ([ReturnConstr tag], fptr, fdptr, stack', vstack, 
+5->     dump, heap', cstore, output, stats)
+5->    where
+5->    heap' = fUpdate heap f_upd upd_slot ([ReturnConstr tag], fptr)
+
+The @MoveD@ instruction moves a closure from the data structure to the
+current frame:
+
+5> step ((MoveD n d : instr), fptr, fdptr, stack, vstack, 
+5>       dump, heap, cstore,output, stats)
+5>  = (instr, fptr, fdptr, stack, vstack, dump, heap', cstore, output, stats)
+5>    where heap' = fUpdate heap fptr n (fGet heap fdptr d)
+
+Finally, the @Print@ instruction performs output:
+
+5-> step (Print:instr, fptr, fdptr, stack, n:vstack,
+5->       dump, heap, cstore, output, stats)
+5->  = (instr, fptr, fdptr, stack, vstack, 
+5->     dump, heap, cstore, output ++ [n], stats)
+
+
+\subsection{Old state transitions}
+
+Here are all the old state transitions, with the extra state components added.
+
+5> step ([Enter am], fptr, fdptr, stack, vstack, 
+5>       dump, heap, cstore, output, stats) 
+5>  = (instr', fptr', FrameNull, stack, vstack, 
+5>     dump, heap, cstore, output, stats)       
+5>    where (instr',fptr') = amToClosure am fptr fdptr heap cstore
+
+5> step ((Push am:instr), fptr, fdptr, stack, vstack, 
+5>       dump, heap, cstore, output, stats)
+5>  = (instr, fptr, fdptr, amToClosure am fptr fdptr heap cstore : stack, 
+5>     vstack, dump, heap, cstore, output, stats)
+
+5> step ((PushV FramePtr:instr), (FrameInt n), fdptr, stack, vstack, 
+5>      dump, heap, cstore, output, stats)
+5>  = (instr, FrameInt n, fdptr, stack, n:vstack, 
+5>     dump, heap, cstore, output, stats)
+
+5> step ((PushV (IntVConst n):instr), fptr, fdptr, stack, vstack, 
+5>      dump, heap, cstore, output, stats)
+5>  = (instr, fptr, fdptr, stack, n:vstack, dump, heap, cstore, output, stats)
+
+5> step ((Op op:instr), fptr, fdptr, stack, vstack, 
+5>       dump, heap, cstore, output, stats)
+5>  = (instr, fptr, fdptr, stack, performOp op vstack, 
+5>     dump, heap, cstore, output, stats)
+
+5> step ((Take tot n : instr), fptr, fdptr, stack, vstack, 
+5>       dump, heap, cstore,output, stats)
+M5>  = (instr, fptr', fdptr, drop n stack, vstack, 
+M5>     dump, heap', cstore, output, stats),            #stack >= n
+GH5>  | length stack >= n = (instr, fptr', fdptr, drop n stack, vstack, 
+GH5>     dump, heap', cstore, output, stats)
+M5>  = error "Too few args for Take instruction",               otherwise
+GH5>  | otherwise = error "Too few args for Take instruction"
+5>    where (heap', fptr') = fAlloc heap frame_cts
+5>                           where
+5>                           frame_cts = take n stack ++ 
+5>                                       take (tot-n) (repeat dummy_closure)
+5>                           dummy_closure = ([], FrameNull)
+
+5> step ((Move n am : instr), fptr, fdptr, stack, vstack, 
+5>       dump, heap, cstore,output, stats)
+5>  = (instr, fptr, fdptr, stack, vstack, dump, heap', cstore, output, stats)
+5>    where heap' = fUpdate heap fptr n (amToClosure am fptr fdptr heap cstore)
+
+5> step ((PushMarker x : instr), fptr, fdptr, stack, vstack, 
+5>        dump, heap, cstore, output, stats)
+5>  = (instr, fptr, fdptr, [], vstack, 
+5>     (fptr, x, stack):dump, heap, cstore, output, stats)
+
+5> step ([Return], fptr, fdptr, (instr',fptr'):stack, vstack, 
+5>      dump, heap, cstore, output, stats)
+5>  = (instr', fptr', FrameNull, stack, vstack, 
+5>     dump, heap, cstore, output, stats)
+
+5> step ([Return], fptr, fdptr, [], n:vstack, 
+5>       (f_upd, x, stack) : dump, heap, cstore, output, stats)
+5>  = ([Return], fptr, fdptr, stack, n:vstack, 
+5>     dump, heap', cstore, output, stats)
+5>    where
+5>    heap' = fUpdate heap f_upd x (intCode, FrameInt n)
+
+5> step ((UpdateMarkers n : instr), fptr, fdptr, stack, vstack,
+5>        dump, heap, cstore, output, stats)
+M5>  = (instr, fptr, fdptr, stack, vstack, 
+M5>     dump, heap, cstore, output, stats),     n <= #stack
+GH5>  | n <= length stack = (instr, fptr, fdptr, stack, vstack, 
+GH5>     dump, heap, cstore, output, stats)
+
+5> step ((UpdateMarkers n : instr), fptr, fdptr, stack, vstack,
+5>        (f_upd, x, stack') : dump, heap, cstore, output, stats)
+5>  = (UpdateMarkers n : instr, fptr, fdptr, stack ++ stack', vstack,
+5>     dump, heap2, cstore, output, stats)
+5>    where
+5>    (heap1, pa_fptr) = fAlloc heap stack
+5>    heap2 = fUpdate heap1 f_upd x (pa_code, pa_fptr)
+5>    pa_code = (map (Push . Arg) (reverse [1..m])) ++ 
+5>               (UpdateMarkers n : instr)
+M5>    m = #stack
+GH5>    m = length stack
+
+5> amToClosure (Arg n)      fptr fdptr heap cstore = fGet heap fptr n
+5> amToClosure (Data n)     fptr fdptr heap cstore = fGet heap fdptr n
+5> amToClosure (Code il)    fptr fdptr heap cstore = (il, fptr)
+5> amToClosure (IntConst n) fptr fdptr heap cstore = (intCode, FrameInt n)
+5> amToClosure (Label l)    fptr fdptr heap cstore 
+5>                              = (codeLookup cstore l, fptr)
+
+
+\subsection{The printing mechanism}
+
+Here is the code for @topCont@ and @headCont@, transcribed from
+Section~\ref{sect:tim:print-list}.
+
+5> topCont = [Switch [(1, []),
+5>                    (2, [ Move 1 (Data 1), Move 2 (Data 2),
+5>                          Push (Code headCont),
+5>                          Enter (Arg 1)
+5>                   ])]]
+5>
+5> headCont = [Print, Push (Code topCont), Enter (Arg 2)]
+
+\subsection{The new prelude}
+
+We add to the standard prelude the definitions given in 
+Section~\ref{sect:tim:data-prelude}
+
+5> extraPreludeDefs
+5>  = [ ("cons",        [], EConstr 2 2),
+5>      ("nil",         [], EConstr 1 0),
+5>      ("true",        [], EConstr 2 0),
+5>      ("false",       [], EConstr 1 0),
+5>
+5>      ("if", ["c","t","f"], ECase (EVar "c") [(1, [], EVar "f"),
+5>                                              (2, [], EVar "t")])
+5>    ]
+
+\subsection{Printing the new instructions}
+
+We add code to print the new instructions.
+
+5-> showInstruction5 d Print = iStr "Print"
+M5-> showInstruction5 d (ReturnConstr t) = iStr "ReturnConstr " $iAppend iNum t
+GH5-> showInstruction5 d (ReturnConstr t) = iStr "ReturnConstr " `iAppend` iNum t
+5-> showInstruction5 d (Switch branches) 
+5->  = iConcat [ 
+5->     iStr "Switch {", iNewline, iStr "  ", 
+5->     iIndent (iInterleave iNewline (map show_branch branches)),
+5->     iStr " }"
+5->   ]
+5->   where
+5->   show_branch (tag, il) 
+5->     = iConcat [ iNum tag, iStr " -> ", showInstructions d il]
+5->
+5-> showInstruction5 d i = error "Unknown instruction"
+
+
+M5> showArg d (Arg m)   = (iStr "Arg ")   $iAppend (iNum m)
+GH5> showArg d (Arg m)   = (iStr "Arg ")   `iAppend` (iNum m)
+M5> showArg d (Data m)  = (iStr "Data ")  $iAppend (iNum m)
+GH5> showArg d (Data m)  = (iStr "Data ")  `iAppend` (iNum m)
+M5> showArg d (Code il) = (iStr "Code ")  $iAppend (showInstructions d il)
+GH5> showArg d (Code il) = (iStr "Code ")  `iAppend` (showInstructions d il)
+M5> showArg d (Label s) = (iStr "Label ") $iAppend (iStr s)
+GH5> showArg d (Label s) = (iStr "Label ") `iAppend` (iStr s)
+M5> showArg d (IntConst n) = (iStr "IntConst ") $iAppend (iNum n)
+GH5> showArg d (IntConst n) = (iStr "IntConst ") `iAppend` (iNum n)
+ 
+5> showStats (instr, fptr, fdptr, stack, vstack, 
+5>            dump, heap, code, output, stats)
+5>  = iConcat [showOutput output,
+5>             iStr "Steps taken = ", iNum (statGetSteps stats), iNewline,
+M5>            iStr "No of frames allocated = ", iNum (# (hAddresses heap)),
+GH5>           iStr "No of frames allocated = ", iNum (length (hAddresses heap)),
+5>             iNewline, iNewline]
+
+5> showState (instr, fptr, fdptr, stack, vstack, 
+5>            dump, heap, cstore, output, stats)
+5>  = iConcat [
+5>      iStr "Code:  ", showInstructions Terse instr, iNewline,
+5>      showFrame heap fptr,
+5>      showStack stack,
+5>      showValueStack vstack,
+5>      showDump dump,
+5>      showOutput output,
+5>      iNewline
+5>    ]
+
+5> showSCDefns (instr, fptr, fdptr, stack, vstack, 
+5>              dump, heap, cstore, output, stats)
+5>  = iInterleave iNewline (map showSC cstore)
+
+5> showOutput output = iConcat [ 
+5>                      iStr "Output: [", 
+5>                      iInterleave (iStr ",") (map iNum output), 
+5>                      iStr "]", iNewline
+5>                     ]
+
+The new @showResults@ function prints output incrementally:
+
+5> showResults states 
+5>  = iDisplay (showR 0 states)
+5>    where
+5>    showR n [state] = iConcat [iNewline, showStats state]
+5>    showR n (state:states)
+M5>     = (iStr ".") $iAppend (showR n states), #output = n
+GH5>     | length output == n = (iStr ".") `iAppend` (showR n states)
+M5>     = iConcat [ iNewline, iNum (last output), 
+M5>                 showR (n+1) states ],               otherwise
+GH5>     | otherwise = iConcat [ iNewline, iNum (last output), 
+GH5>                            showR (n+1) states ]
+5>      where
+5>      (instr, fptr, fdptr, stack, vstack, 
+5>       dump, heap, cstore, output, stats) = state

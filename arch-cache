@@ -1,0 +1,113 @@
+# Initialisation
+#   -- mainly for stylistic purposes, could be done using
+#	load immediates in-line
+
+	la $8, program		# Simulator's Program Counter
+	li $19,0		# Simulator's Accumulator reg
+
+	li $12,0xa0000000	# sw instruction
+	li $13,0xac000000	# lw instruction
+
+	li $23,0xfc000000	# Opcode selector
+	not $24,$23		# Address selector
+	li $25,0xfffffff0	# tag selector
+	li $7,0xffffffff	# Unused tag indicator
+
+	la $14, memory		# Memory base register
+	la $26, cache		# Cache base register
+	la $27, tags		# Tag base register
+
+
+# Main instruction decode loop
+
+loop:	lw $10, ($8)		# Load instruction
+	addi $8,4		# PC++
+
+	and $11,$10,$23		# opcode in $11
+	and $20,$10,$24		# address in $20
+	sll $20,$20,2		# get real address
+	and $21,$20,$25		# tag in $21
+	andi $22,$20,0x0f	# cache/tag offset
+	add $20,$20,$14		# convert to real memory location
+	add $18,$22,$27		# tag location
+	add $17,$22,$26		# cache location
+
+	beq $11,$12,store	# Dispatch the instruction
+	beq $11,$13,load
+	bne $10,$0, loop
+
+	halt
+
+
+# Simulating Load instructions
+
+load:	lw $16, ($18)		# is the tag the same as this one
+	beq $16,$21,fromcache
+	beq $16,$7,noflushload
+
+	add $16,$21,$22		# Reconstruct address
+	add $9,$16,$14		# ditto
+
+	lw $16, ($17)		# load word from cache
+	sw $16, ($9)		# flush to memory
+
+noflushload:
+	lw $16, ($20)		# load word from memory
+	sw $16, ($17)		# save word in cache
+	sw $21, ($18)
+
+fromcache:
+	lw $19,($17)
+	b loop
+
+
+# Simulating Store instructions
+
+store:	lw $16, ($18)		# Check the tag
+	beq $16,$21,noflushstore
+	beq $16,$7,noflushstore
+
+	add $16,$21,$22		# Reconstruct address
+	add $9,$16,$14		# ditto
+
+	lw $16, ($17)		# load word in cache
+	sw $16, ($9)		# flush to memory
+	sw $21, ($18)		# save cache tag
+
+noflushstore:
+	sw $19, ($17)		# Save word in cache
+	b loop
+
+# The cache and tag store definitions
+
+.data
+cache:	.word 0
+	.word 0
+	.word 0
+	.word 0
+tags:	.word  0xffffffff
+	.word  0xffffffff
+	.word  0xffffffff
+	.word  0xffffffff
+
+# The memory with sample contents
+
+memory:	.word 12
+	.word 13
+	.word 14
+	.word 15
+	.word 16
+	.word 17
+	.word 18
+	.word 19
+
+# Sample program to fill the cache, testing flushing and caching
+
+program:    .word 0xac000001
+	    .word 0xac000002
+	    .word 0xac000003
+	    .word 0xac000004
+	    .word 0xac000000
+	    .word 0xac000002
+	    .word 0
+

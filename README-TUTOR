@@ -1,0 +1,60 @@
+		Tutor's Guide to
+
+	Implementing functional languages: a tutorial
+	~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	Simon L Peyton Jones 		David Lester
+	simonpj@dcs.glasgow.ac.uk	davidl@cs.man.ac.uk
+
+	Version V1.2T0
+
+The Tutor's Guide for our book consists mainly of Miranda
+code which solves the various exercises.  It does't really contain
+much "guidance"!  Still, we hope to improve it, especially in
+response to any shortcomings which actually cause you grief (mail us).
+
+Keeping the solutions private
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The book are obviously much less useful as a course text if the
+solutions are public knowledge. So please take elementary precautions,
+so that your copy is not readable by students.  The easiest thing
+to do is probably to make the entire directory readable only by you.
+
+Where the files live
+~~~~~~~~~~~~~~~~~~~~
+The files for the Tutor's Guide should live in the same directory
+as all the other files for the book.  The Makefile distributed with
+the main book already knows about the Tutor's Guide files.
+
+
+Versions and updates
+~~~~~~~~~~~~~~~~~~~~
+You'll see the version number of this iteration of the Tutor's Guide
+at the top of this file.  It will be something like
+
+	Version V2.9T2
+
+That indicates that this version of the Tutor's Guide relates to
+Version V2.9 of the main book, and there have since been 2 updates 
+to the Tutor's Guide.
+
+I'll send out each update in the form of a shar file containing the
+patch file
+
+	pjlester-2.9T2-2.9T3.diffs
+
+Put this file in the same directory as all the others, and pipe it into
+
+	patch -p1
+
+You must apply any earlier patches first.
+
+Release history
+~~~~~~~~~~~~~~~
+Below is an indication of what has changed at each update.
+
+Version		Changes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+V1.2T0		The initial release
+V1.3T0		Corresponds to main 1.3
+V1.4T0		Corresponds to main 1.4
